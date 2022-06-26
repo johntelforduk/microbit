@@ -1,9 +1,12 @@
-from microbit import *
+# Snake.
+# June 2022.
+
+import microbit
 import random
 import music
 
-heartbeat = 50  # Number of miliseconds between each heartbeat.
-edge_x, edge_y = 4, 4
+heartbeat = 50  # Number of milliseconds between each heartbeat.
+edge_x, edge_y = 4, 4  # Edges of the screen.
 
 
 class Snake:
@@ -15,69 +18,90 @@ class Snake:
         self.segments = [(2, 2)]  # Start with just a head segment.
 
         # 0 = East, 1 = South, 2 = West, 3 = North.
+        self.deltas = [(1, 0), (0, 1), (-1, 0), (0, -1)]
         self.direction = random.randrange(4)
 
         self.eaten_egg = False
-        self.eaten_itself = False
+        self.dead = False
 
-        self.deltas = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+    @staticmethod
+    def clockwise(d: int) -> int:
+        return (d + 1) % 4
+
+    @staticmethod
+    def anti_clockwise(d: int) -> int:
+        return (d - 1) % 4
 
     def head(self):
+        """Return coords of the head of the snake."""
+        # Last item in the segment list is the head of the snake.
         return self.segments[-1]
 
-    def render(self):
-        # Skip last element of list (which is the head).
-        for (x, y) in self.segments[:-1]:
-            display.set_pixel(x, y, 7)
+    @staticmethod
+    def in_grid(x: int, y: int) -> bool:
+        """Return True if the parm coords are in the game grid. False otherwise."""
+        return 0 <= x <= edge_x and 0 <= y <= edge_y
+
+    def next(self, x: int, y: int, d: int) -> (int, int):
+        """Return coords of next move for parm coords and direction."""
+        dx, dy = self.deltas[d]
+        return x + dx, y + dy
+
+    def eaten_itself(self, x: int, y: int) -> bool:
+        if (x, y) not in self.segments:
+            return False
+        if self.segments.index((x, y)) == len(self.segments) - 1:
+            return False
+        return True
+
+    def render(self, f):
+        """Draw the snake on the parm image frame."""
         # Set the head to max brightness.
-        head_x, head_y = self.head()
-        display.set_pixel(head_x, head_y, 9)
+        x, y = self.head()
+        f.set_pixel(x, y, 9)
+
+        # Skip the last element of list (which is the head).
+        # Make the body of the snake a little less bright than the head.
+        for (x, y) in self.segments[:-1]:
+            frame.set_pixel(x, y, 7)
 
     def move(self):
-        if button_a.was_pressed():
-            self.anti_clockwise()
-        if button_b.was_pressed():
-            self.clockwise()
+        if microbit.button_a.was_pressed():
+            self.direction = self.anti_clockwise(self.direction)
+        if microbit.button_b.was_pressed():
+            self.direction = self.clockwise(self.direction)
+        # First, try heading straight ahead.
+        x, y = self.head()
+        d = self.direction
+        px, py = self.next(x, y, d)
 
-        head_x, head_y = self.head()
+        # If that's no good...
+        if not self.in_grid(px, py) or self.eaten_itself(x, y):
+            # ... next, find out what Clockwise is like.
+            d_cw = self.clockwise(d)
+            x_cw, y_cw = self.next(x, y, d_cw)
 
-        # Check for head in corners.
-        if (head_x, head_y) == (edge_x, 0):
-            self.direction = 1
-        elif (head_x, head_y) == (edge_x, edge_y):
-            self.direction = 2
-        elif (head_x, head_y) == (0, edge_y):
-            self.direction = 3
-        elif (head_x, head_y) == (0, 0):
-            self.direction = 0
+            if not self.in_grid(x_cw, y_cw) or self.eaten_itself(x_cw, y_cw):
+                # If still no good, try anticlockwise.
+                d_acw = self.anti_clockwise(d)
+                x_acw, y_acw = self.next(x, y, d_acw)
 
-        elif head_x == edge_x and self.direction == 0:
-            self.direction = 1
-        elif head_y == edge_y and self.direction == 1:
-            self.direction = 2
-        elif head_x == 0 and self.direction == 2:
-            self.direction = 3
-        elif head_y == 0 and self.direction == 3:
-            self.direction = 0
-
-        dx, dy = self.deltas[self.direction]
-
-        self.segments.append((head_x + dx, head_y + dy))
-        if self.eaten_egg:
-            self.eaten_egg = False
+                if not self.in_grid(x_acw, y_acw) or self.eaten_itself(x_acw, y_acw):
+                    # If still no good, then we're dead :(
+                    self.dead = True
+                else:
+                    x, y, self.direction = x_acw, y_acw, d_acw
+            else:
+                x, y, self.direction = x_cw, y_cw, d_cw
         else:
-            del self.segments[0]
-        self.check_eaten_itself()
+            x, y = px, py
 
-    def check_eaten_itself(self):
-        if self.segments.index(self.head()) != len(self.segments) - 1:
-            self.eaten_itself = True
-
-    def clockwise(self):
-        self.direction = (self.direction + 1) % 4
-
-    def anti_clockwise(self):
-        self.direction = (self.direction - 1) % 4
+        if self.dead is False:
+            self.segments.append((x, y))
+            if self.eaten_egg:
+                self.eaten_egg = False
+            else:
+                del self.segments[0]
 
     def tick(self):
         if self.wait <= 0:
@@ -110,18 +134,19 @@ class Egg:
             self.phase = "wane"
             self.brightness = 9
 
-    def render(self):
-        display.set_pixel(self.x, self.y, int(self.brightness))
+    def render(self, f):
+        f.set_pixel(self.x, self.y, int(self.brightness))
 
 
 while True:
     snake = Snake()
     egg = Egg()
 
-    while snake.eaten_itself is False:
-        display.clear()
-        snake.render()
-        egg.render()
+    while snake.dead is False:
+        frame = microbit.Image()
+        snake.render(frame)
+        egg.render(frame)
+        microbit.display.show(frame)
 
         if snake.head() == (egg.x, egg.y):
             snake.eaten_egg = True
@@ -131,11 +156,12 @@ while True:
 
         snake.tick()
         egg.tick()
-        sleep(heartbeat)
+        microbit.sleep(heartbeat)
 
-    while button_a.was_pressed() is False:
-        display.scroll(str(len(snake.segments)))
-        sleep(1000)
+    music.play(music.POWER_DOWN)
+    while microbit.button_a.was_pressed() is False:
+        microbit.display.scroll(str(len(snake.segments)))
+        microbit.sleep(1000)
 
     del snake
     del egg
